@@ -1,0 +1,232 @@
+const express = require('express');
+const fs = require('fs');
+const path = require('path');
+const multer = require('multer');
+const { v4: uuidv4 } = require('uuid'); // Thư viện tạo ID ngẫu nhiên
+const bodyParser = require('body-parser');
+const http = require('http');
+
+const app = express();
+const port = 3000;
+
+app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: true }));
+
+const videoFolders = {
+    folder1: path.join(__dirname, 'folder1'),
+    folder2: path.join(__dirname, 'folder2')
+};
+const uploadFolder = path.join(__dirname, 'uploads');
+const noteFolder = path.join(__dirname, 'notes');
+
+if (!fs.existsSync(noteFolder)) {
+    fs.mkdirSync(noteFolder);
+}
+
+// Cấu hình multer cho việc upload file
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        const fileExtension = path.extname(file.originalname).toLowerCase();
+        let uploadPath = '';
+
+        if (['.mp4', '.avi', '.mov', '.mkv', '.flv', '.webm', '.wmv', '.3gp', '.3g2'].includes(fileExtension)) {
+            uploadPath = path.join(uploadFolder, 'videos');
+        } else if (['.txt', '.doc', '.pdf', '.js', '.json'].includes(fileExtension)) {
+            uploadPath = path.join(uploadFolder, 'texts');
+        } else {
+            uploadPath = path.join(uploadFolder, 'others');
+        }
+
+        cb(null, uploadPath);
+    },
+    filename: (req, file, cb) => {
+        cb(null, Date.now() + path.extname(file.originalname));
+    }
+});
+
+const upload = multer({ storage: storage });
+
+const getRandomVideo = (folderPath) => {
+    const allVideos = [];
+    const files = fs.readdirSync(folderPath);
+
+    files.forEach(file => {
+        const filePath = path.join(folderPath, file);
+        if (fs.lstatSync(filePath).isFile() && ['.mp4', '.avi', '.mov', '.mkv', '.flv', '.webm', '.wmv', '.3gp', '.3g2'].includes(path.extname(file))) {
+            allVideos.push(filePath);
+        }
+    });
+
+    if (allVideos.length === 0) {
+        return null;
+    }
+
+    const randomVideo = allVideos[Math.floor(Math.random() * allVideos.length)];
+    return randomVideo;
+};
+
+// API để lấy ngẫu nhiên đường dẫn video từ folder1 và chiếu trực tiếp
+app.get('/get-random-video1', (req, res) => {
+    const videoPath = getRandomVideo(videoFolders.folder1);
+    if (!videoPath) {
+        return res.status(404).json({ message: 'No videos found in folder1' });
+    }
+
+    res.json({ videoUrl: `http://duongkum999.tech/${path.relative(__dirname, videoPath).replace(/\\/g, '/')}` });
+});
+
+// API để lấy ngẫu nhiên đường dẫn video từ folder2 và chiếu trực tiếp
+app.get('/get-random-video2', (req, res) => {
+    const videoPath = getRandomVideo(videoFolders.folder2);
+    if (!videoPath) {
+        return res.status(404).json({ message: 'No videos found in folder2' });
+    }
+
+    res.json({ videoUrl: `http://duongkum999.tech/${path.relative(__dirname, videoPath).replace(/\\/g, '/')}` });
+});
+
+// API để upload file
+app.post('/upload-file', upload.single('file'), (req, res) => {
+    if (!req.file) {
+        return res.status(400).json({ message: 'No file uploaded' });
+    }
+
+    const fileUrl = `http://duongkum999.tech/${path.relative(__dirname, req.file.path).replace(/\\/g, '/')}`;
+    res.json({ fileUrl: fileUrl });
+});
+
+// Serve static files
+app.use('/uploads', express.static(uploadFolder));
+
+// API để tạo note mới và chuyển hướng đến trang edit
+app.get('/note', (req, res) => {
+    const noteId = uuidv4();
+    const filePath = path.join(noteFolder, `${noteId}.txt`);
+    fs.writeFileSync(filePath, '', 'utf-8'); // Lưu trữ nội dung ban đầu là rỗng
+
+    // Chuyển hướng người dùng đến trang chỉnh sửa
+    res.redirect(`/note/edit?id=${noteId}`);
+});
+
+// Truy cập chế độ edit
+app.get('/note/edit', (req, res) => {
+    const noteId = req.query.id;
+    const filePath = path.join(noteFolder, `${noteId}.txt`);
+
+    if (!fs.existsSync(filePath)) {
+        return res.status(404).json({ message: 'Note not found' });
+    }
+
+    const content = fs.readFileSync(filePath, 'utf-8');
+    res.send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Edit Note</title>
+            <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.61.1/codemirror.min.css">
+            <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.61.1/codemirror.min.js"></script>
+            <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.61.1/mode/markdown/markdown.min.js"></script>
+            <style>
+                .CodeMirror {
+                    border: 1px solid #eee;
+                    height: auto;
+                }
+                body {
+                    font-family: Arial, sans-serif;
+                    margin: 20px;
+                }
+            </style>
+        </head>
+        <body>
+            <h1>Edit Note</h1>
+            <textarea id="editor">${content}</textarea>
+            <script>
+                const editor = CodeMirror.fromTextArea(document.getElementById('editor'), {
+                    lineNumbers: true,
+                    mode: 'markdown'
+                });
+
+                let isLocalChange = false;
+
+                editor.on('change', () => {
+                    isLocalChange = true;
+                    const content = editor.getValue();
+                    fetch('/note/update', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ noteId: '${noteId}', content: content })
+                    }).then(() => {
+                        isLocalChange = false;
+                    });
+                });
+
+                const eventSource = new EventSource('/note/updates?id=${noteId}');
+                eventSource.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    if (data.noteId === '${noteId}' && !isLocalChange) {
+                        editor.setValue(data.content);
+                    }
+                };
+            </script>
+        </body>
+        </html>
+    `);
+});
+
+// Truy cập chế độ raw
+app.get('/note/raw', (req, res) => {
+    const noteId = req.query.id;
+    const filePath = path.join(noteFolder, `${noteId}.txt`);
+
+    if (!fs.existsSync(filePath)) {
+        return res.status(404).json({ message: 'Note not found' });
+    }
+
+    const content = fs.readFileSync(filePath, 'utf-8');
+    res.send(`<pre>${content}</pre>`);
+});
+
+// API để cập nhật nội dung ghi chú
+app.post('/note/update', (req, res) => {
+    const { noteId, content } = req.body;
+    const filePath = path.join(noteFolder, `${noteId}.txt`);
+
+    if (!fs.existsSync(filePath)) {
+        return res.status(404).json({ message: 'Note not found' });
+    }
+
+    fs.writeFileSync(filePath, content, 'utf-8');
+    res.status(200).json({ message: 'Note updated' });
+
+    // Gửi cập nhật đến tất cả các kết nối SSE
+    clients.forEach(client => {
+        client.res.write(`data: ${JSON.stringify({ noteId, content })}\n\n`);
+    });
+});
+
+// Thiết lập SSE để gửi cập nhật thời gian thực
+const clients = [];
+
+app.get('/note/updates', (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+
+    const clientId = Date.now();
+    clients.push({ id: clientId, res });
+
+    req.on('close', () => {
+        clients = clients.filter(client => client.id !== clientId);
+    });
+});
+
+// Bắt đầu server
+app.listen(port, () => {
+    console.log(`Server is running on http://localhost:${port}`);
+});
+
+lại vấn đề nữa với note lần này là chữ chạy ngược ra sau khi gõ ví dụ tôi gõ vi thì thành iv
+và xuống dòng thình nhảy ngược lên 

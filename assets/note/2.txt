@@ -1,0 +1,51 @@
+const axios = require('axios');
+
+async function fetchData() {
+    try {
+        const response = await axios.post("http://tracuudiem.langson.edu.vn/tra_cuu_diem_tn_thpt.php", "search_text=10000001", {
+            headers: {
+                "accept": "text/html, */*; q=0.01",
+                "accept-language": "vi,en;q=0.9,vi-VN;q=0.8,en-US;q=0.7,zh-CN;q=0.6,zh;q=0.5",
+                "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
+                "x-requested-with": "XMLHttpRequest",
+                "Referer": "http://tracuudiem.langson.edu.vn/?fbclid=IwZXh0bgNhZW0CMTAAAR24uVY7usF5ggFzC38NftcgD_l458h0UgvMnyeQIV0cdiA1KXUKuQiRPc0_aem_Oka6vcMrJKmGbk70Ul2Zdg",
+                "Referrer-Policy": "strict-origin-when-cross-origin"
+            }
+        });
+
+        const data = response.data;
+        const result = extractScores(data);
+        console.log(result);
+
+    } catch (error) {
+        console.error('Error fetching data:', error);
+    }
+}
+
+function extractScores(data) {
+    let fullNameMatch = data.match(/<b>Họ và tên<\/b>:\s*(.*?)<\/br>/);
+    let idMatch = data.match(/<b>Số báo danh<\/b>:\s*(\d+)<\/br>/);
+    let scoresInfoMatch = data.match(/<b>Điểm các bài thi<\/b>:(.*?)<\/font>/s);
+
+    if (!fullNameMatch || !idMatch || !scoresInfoMatch) {
+        throw new Error('Cannot extract data');
+    }
+
+    let fullName = fullNameMatch[1].trim();
+    let id = idMatch[1];
+    let scoresInfo = scoresInfoMatch[1];
+
+    let subjects = ["Toán", "Ngữ văn", "Vật lí", "Hóa học", "Sinh học", "KHTN", "Lịch sử", "Địa lí", "GDCD", "KHXH", "Tiếng Anh"];
+    let scores = {};
+
+    subjects.forEach(subject => {
+        let scoreMatch = scoresInfo.match(new RegExp(`${subject}:\\s*(\\d+\\.\\d+)`, 'i'));
+        if (scoreMatch) {
+            scores[subject] = parseFloat(scoreMatch[1]);
+        }
+    });
+
+    return { fullName, id, scores };
+}
+
+fetchData();

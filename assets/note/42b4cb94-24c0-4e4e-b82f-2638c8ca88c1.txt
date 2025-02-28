@@ -1,0 +1,84 @@
+const fs = require('fs');
+const path = require('path');
+
+// Đọc từ điển từ file trong thư mục cache
+const dictionary = new Set();
+const dictionaryPath = path.join(__dirname, '..', 'cache', 'words.txt');
+
+fs.readFileSync(dictionaryPath, 'utf-8').split('\n').forEach(line => {
+    const word = JSON.parse(line).text.toLowerCase();
+    dictionary.add(word);
+});
+
+this.zuckbotconfig = {
+    name: 'noiTu',
+    version: '1.0.0',
+    role: 0,
+    author: 'Your Name',
+    info: 'Lệnh nối từ',
+    Category: 'Game',
+    cd: 5,
+    aliases: ['wordchain']
+};
+
+const wordChain = new Map();
+
+this.onRun = async function ({ api, event }) {
+    const { threadID, senderID, body, messageID } = event;
+    const message = body.trim().toLowerCase();
+    if (!message) return api.sendMessage('Vui lòng nhập từ để nối.', threadID, messageID);
+
+    if (!wordChain.has(threadID)) {
+        wordChain.set(threadID, {
+            lastWord: '',
+            mode: '', // 'player' hoặc 'bot'
+            players: new Map()
+        });
+    }
+
+    const gameData = wordChain.get(threadID);
+
+    if (!gameData.mode) {
+        // Chế độ chưa được chọn
+        if (message === 'người với người') {
+            gameData.mode = 'player';
+            return api.sendMessage('Đã chọn chế độ người với người. Người chơi đầu tiên nhập từ bắt đầu.', threadID, messageID);
+        } else if (message === 'người với máy') {
+            gameData.mode = 'bot';
+            return api.sendMessage('Đã chọn chế độ người với máy. Người chơi đầu tiên nhập từ bắt đầu.', threadID, messageID);
+        } else {
+            return api.sendMessage('Vui lòng chọn chế độ: "người với người" hoặc "người với máy".', threadID, messageID);
+        }
+    }
+
+    const lastWord = gameData.lastWord;
+    const lastChar = lastWord ? lastWord.slice(-1) : '';
+
+    if (!lastWord || message.startsWith(lastChar)) {
+        if (!dictionary.has(message)) {
+            return api.sendMessage(`Từ "${message}" không có trong từ điển. Vui lòng thử lại.`, threadID, messageID);
+        }
+        gameData.lastWord = message;
+        api.sendMessage(`Từ hợp lệ: ${message}`, threadID, messageID);
+
+        if (gameData.mode === 'bot') {
+            // Chế độ người với máy
+            let responseWord = '';
+            for (let word of dictionary) {
+                if (word.startsWith(message.slice(-1))) {
+                    responseWord = word;
+                    break;
+                }
+            }
+            if (responseWord) {
+                gameData.lastWord = responseWord;
+                api.sendMessage(`Máy: ${responseWord}`, threadID, messageID);
+            } else {
+                api.sendMessage('Máy không tìm thấy từ nối tiếp. Bạn đã thắng!', threadID, messageID);
+                wordChain.delete(threadID);
+            }
+        }
+    } else {
+        api.sendMessage(`Từ không hợp lệ! Từ cuối cùng là "${lastWord}". Hãy bắt đầu từ bằng chữ "${lastChar}".`, threadID, messageID);
+    }
+};

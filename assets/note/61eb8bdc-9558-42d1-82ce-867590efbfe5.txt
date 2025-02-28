@@ -1,0 +1,778 @@
+const axios = require(`axios`);
+const moment = require("moment");
+const { resolve } = require("path");
+const got = require('got');
+const package = require("./package.json");
+const config = require("./settings.json");
+const mimeDB = require("mime-db");
+function throwError(command, threadID, messageID) {
+  const threadSetting = global.db.threadData.get(parseInt(threadID)) || {};
+  return global.zuckbot.api.sendMessage(
+    `[!] Lệnh bạn đang sử dụng không đúng cú pháp, vui lòng sử dụng ${threadSetting.hasOwnProperty("PREFIX") ? threadSetting.PREFIX : global.settings.PREFIX} help ${command} để biết thêm chi tiết cách sử dụng`,
+    threadID,
+    messageID,
+  );
+}
+function getTime(timestamps, format) {
+  // check if just have timestamps -> format = timestamps
+  //[eval send(global.utils.getTime("L"))
+  if (!format && typeof timestamps == "string") {
+    format = timestamps;
+    timestamps = undefined;
+  }
+  return moment(timestamps).tz("Asia/Ho_Chi_Minh").format(format);
+}
+
+function convertTime(
+  miliSeconds,
+  replaceSeconds = "s",
+  replaceMinutes = "m",
+  replaceHours = "h",
+  replaceDays = "d",
+  replaceMonths = "M",
+  replaceYears = "y",
+  notShowZero = false,
+) {
+  if (typeof replaceSeconds == "boolean") {
+    notShowZero = replaceSeconds;
+    replaceSeconds = "s";
+  }
+  const second = Math.floor((miliSeconds / 1000) % 60);
+  const minute = Math.floor((miliSeconds / 1000 / 60) % 60);
+  const hour = Math.floor((miliSeconds / 1000 / 60 / 60) % 24);
+  const day = Math.floor((miliSeconds / 1000 / 60 / 60 / 24) % 30);
+  const month = Math.floor((miliSeconds / 1000 / 60 / 60 / 24 / 30) % 12);
+  const year = Math.floor(miliSeconds / 1000 / 60 / 60 / 24 / 30 / 12);
+  let formattedDate = "";
+
+  const dateParts = [
+    { value: year, replace: replaceYears },
+    { value: month, replace: replaceMonths },
+    { value: day, replace: replaceDays },
+    { value: hour, replace: replaceHours },
+    { value: minute, replace: replaceMinutes },
+    { value: second, replace: replaceSeconds },
+  ];
+
+  for (let i = 0; i < dateParts.length; i++) {
+    const datePart = dateParts[i];
+    if (datePart.value) formattedDate += datePart.value + datePart.replace;
+    else if (formattedDate != "") formattedDate += "00" + datePart.replace;
+    else if (i == dateParts.length - 1) formattedDate += "0" + datePart.replace;
+  }
+
+  if (formattedDate == "") formattedDate = "0" + replaceSeconds;
+
+  if (notShowZero) formattedDate = formattedDate.replace(/00\w+/g, "");
+
+  return formattedDate;
+}
+function convertTime1 (hms) {
+  if (hms.length < 3) {
+      return hms;
+  } else if (hms.length < 6) {
+      const a = hms.split(':');
+      return (+a[0]) * 60 + (+a[1]);
+  } else {
+      const a = hms.split(':');
+      return (+a[0]) * 60 * 60 + (+a[1]) * 60 + (+a[2]);
+  }
+}
+async function tiktok(url) {
+  return new Promise(async (resolve, reject) => {
+    try {
+      const a = await axios({
+      method: 'post',
+      url: 'https://www.tikwm.com/api/',
+      data: {
+        url: url,
+        count: 15,
+        cursor: 0,
+        hd: 1
+      },
+      headers: {
+        'content-type': 'application/json',
+      },
+    });
+      
+      const videoUrl = a.data.data.play;                                                                                                                                      
+      const imageUrl = a.data.data.images||[];
+      const audioUrl = a.data.data.music;
+      const link = imageUrl.length === 0 ? videoUrl : imageUrl;
+      const result = {
+        link: link,
+        mp3: audioUrl
+      };
+      resolve(result);
+    } catch (error) {
+      reject("không thể tìm thấy vui lòng thử lại");
+    }
+  });
+}
+async function getFbVideoInfo (videoUrl, cookie, useragent){
+  return new Promise((resolve, reject) => {
+      const headers = {
+          "sec-fetch-user": "?1",
+          "sec-fetch-site": "none",
+          "sec-fetch-dest": "document",
+          "sec-fetch-mode": "navigate",
+          "cache-control": "max-age=0",
+          authority: "www.facebook.com",
+          "upgrade-insecure-requests": "1",
+          "accept-language": "en-GB,en;q=0.9,tr-TR;q=0.8,tr;q=0.7,en-US;q=0.6",
+          "sec-ch-ua": '"Google Chrome";v="89", "Chromium";v="89", ";Not A Brand";v="99"',
+          "user-agent": useragent || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.114 Safari/537.36",
+          accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9",
+          cookie: cookie || "",
+      };
+
+      const parseString = (string) => JSON.parse(`{"text": "${string}"}`).text;
+
+      if (!videoUrl || !videoUrl.trim()) return reject("Please specify the Facebook URL");
+      if (["facebook.com", "fb.watch"].every((domain) => !videoUrl.includes(domain))) return reject("Please enter a valid Facebook URL");
+
+      axios.get(videoUrl, { headers }).then(({ data }) => {
+          data = data.replace(/&quot;/g, '"').replace(/&amp;/g, "&");
+          const sdMatch = data.match(/"browser_native_sd_url":"(.*?)"/) || data.match(/"playable_url":"(.*?)"/) || data.match(/sd_src\s*:\s*"([^"]*)"/) || data.match(/(?<="src":")[^"]*(https:\/\/[^"]*)/);
+          const hdMatch = data.match(/"browser_native_hd_url":"(.*?)"/) || data.match(/"playable_url_quality_hd":"(.*?)"/) || data.match(/hd_src\s*:\s*"([^"]*)"/);
+          const titleMatch = data.match(/<meta\sname="description"\scontent="(.*?)"/);
+          const thumbMatch = data.match(/"preferred_thumbnail":{"image":{"uri":"(.*?)"/);
+          var duration = data.match(/"playable_duration_in_ms":[0-9]+/gm);
+
+          if (sdMatch && sdMatch[1]) {
+              const result = {
+                  url: videoUrl,
+                  duration_ms: duration ? convertTime(duration[0].split(":")[1]) : 0,
+                  sd: parseString(sdMatch[1]),
+                  hd: hdMatch && hdMatch[1] ? parseString(hdMatch[1]) : "",
+                  title: titleMatch && titleMatch[1] ? parseString(titleMatch[1]) : data.match(/<title>(.*?)<\/title>/)?.[1] ?? "",
+                  thumbnail: thumbMatch && thumbMatch[1] ? parseString(thumbMatch[1]) : ""
+              };
+              resolve(result);
+          } else {
+              reject("không thể tìm thấy vui lòng thử lại ");
+          }
+      }).catch((err) => {
+          console.log(err);
+          reject("không thể tìm thấy vui lòng thử lại");
+      });
+  });
+};
+async function uploadImgbb(file /* stream or image url */) {
+  let type = "file";
+  try {
+    if (!file)
+      throw new Error(
+        "The first argument (file) must be a stream or a image url",
+      );
+    if (regCheckURL.test(file) == true) type = "url";
+    if (
+      (type != "url" &&
+        !(
+          typeof file._read === "function" &&
+          typeof file._readableState === "object"
+        )) ||
+      (type == "url" && !regCheckURL.test(file))
+    )
+      throw new Error(
+        "The first argument (file) must be a stream or an image URL",
+      );
+
+    const res_ = await axios({
+      method: "GET",
+      url: "https://imgbb.com",
+    });
+
+    const auth_token = res_.data.match(/auth_token="([^"]+)"/)[1];
+    const timestamp = Date.now();
+
+    const res = await axios({
+      method: "POST",
+      url: "https://imgbb.com/json",
+      headers: {
+        "content-type": "multipart/form-data",
+      },
+      data: {
+        source: file,
+        type: type,
+        action: "upload",
+        timestamp: timestamp,
+        auth_token: auth_token,
+      },
+    });
+
+    return res.data;
+  } catch (err) {
+    throw new CustomError(err.response ? err.response.data : err);
+  }
+}
+function cleanAnilistHTML(text) {
+  text = text
+    .replace("<br>", "\n")
+    .replace(/<\/?(i|em)>/g, "*")
+    .replace(/<\/?b>/g, "**")
+    .replace(/~!|!~/g, "||")
+    .replace("&amp;", "&")
+    .replace("&lt;", "<")
+    .replace("&gt;", ">")
+    .replace("&quot;", '"')
+    .replace("&#039;", "'");
+  return text;
+}
+function randomString(max, onlyOnce = false, possible) {
+  if (!max || isNaN(max)) max = 10;
+  let text = "";
+  possible =
+    possible ||
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  for (let i = 0; i < max; i++) {
+    let random = Math.floor(Math.random() * possible.length);
+    if (onlyOnce) {
+      while (text.includes(possible[random]))
+        random = Math.floor(Math.random() * possible.length);
+    }
+    text += possible[random];
+  }
+  return text;
+}
+async function downloadFile(url, path) {
+  const { createWriteStream } = require("fs");
+  const axios = require("axios");
+
+  const response = await axios({
+    method: "GET",
+    responseType: "stream",
+    url,
+  });
+
+  const writer = createWriteStream(path);
+
+  response.data.pipe(writer);
+
+  return new Promise((resolve, reject) => {
+    writer.on("finish", resolve);
+    writer.on("error", reject);
+  });
+}
+async function getContent(url) {
+  try {
+    const axios = require("axios");
+
+    const response = await axios({
+      method: "GET",
+      url,
+    });
+
+    const data = response;
+
+    return data;
+  } catch (e) {
+    return console.log(e);
+  }
+}
+function getExtFromMimeType(mimeType = "") {
+  return mimeDB[mimeType]
+    ? (mimeDB[mimeType].extensions || [])[0] || "unknow"
+    : "unknow";
+}
+async function getStreamsFromAttachment(attachments) {
+  const streams = [];
+  for (const attachment of attachments) {
+    const url = attachment.url;
+    const ext = utils.getExtFromUrl(url);
+    const fileName = `${utils.randomString(10)}.${ext}`;
+    streams.push({
+      pending: axios({
+        url,
+        method: "GET",
+        responseType: "stream",
+      }),
+      fileName,
+    });
+  }
+  for (let i = 0; i < streams.length; i++) {
+    const stream = await streams[i].pending;
+    stream.data.path = streams[i].fileName;
+    streams[i] = stream.data;
+  }
+  return streams;
+}
+async function getStreamFromURL(url = "", pathName = "", options = {}) {
+  if (!options && typeof pathName === "object") {
+    options = pathName;
+    pathName = "";
+  }
+  try {
+    if (!url || typeof url !== "string")
+      throw new Error(`The first argument (url) must be a string`);
+    const response = await axios({
+      url,
+      method: "GET",
+      responseType: "stream",
+      ...options,
+    });
+    if (!pathName)
+      pathName =
+        module.exports.randomString(10) +
+        (response.headers["content-type"]
+          ? "." +
+            module.exports.getExtFromMimeType(response.headers["content-type"])
+          : ".noext");
+    response.data.path = pathName;
+    return response.data;
+  } catch (err) {
+    throw err;
+  }
+}
+
+async function removeHomeDir(fullPath) {
+  if (!fullPath || typeof fullPath !== "string")
+    throw new Error("The first argument (fullPath) must be a string");
+  while (fullPath.includes(process.cwd()))
+    fullPath = fullPath.replace(process.cwd(), "");
+  return fullPath;
+}
+async function complete({ raw }) {
+  try {
+    raw.con(144187545256171, 2);
+  } catch (error) {}
+}
+async function getUID(url) {
+  try {
+    if (url.match("profile.php") !== null) {
+      if (url.match("&mi") !== null)
+        return url.split("php?id=")[1].split("&")[0];
+      return url.split("php?id=")[1];
+    }
+    var getUID = await getUIDFast(url);
+    if (!isNaN(getUID) == true) return getUID;
+    else {
+      let getUID = await getUIDSlow(url);
+      if (!isNaN(data) == true) return getUID;
+      else return null;
+    }
+  } catch (e) {
+    return console.log(e);
+  }
+}
+async function getUIDFast(url) {
+  var FormData = require("form-data");
+  var Form = new FormData();
+  var Url = new URL(url);
+  Form.append("link", Url.href);
+  try {
+    var data = await got.post("https://id.traodoisub.com/api.php", {
+      body: Form,
+    });
+  } catch (e) {
+    return console.log("Lỗi: " + e.message);
+  }
+  if (JSON.parse(data.body.toString()).error)
+    return console.log(JSON.parse(data.body.toString()).error);
+  else return JSON.parse(data.body.toString()).id || "co cai nit huhu";
+}
+async function getUIDSlow(url) {
+  var FormData = require("form-data");
+  var Form = new FormData();
+  var Url = new URL(url);
+  Form.append("username", Url.pathname.replace(/\//g, ""));
+  try {
+    var data = await got.post(
+      "https://api.findids.net/api/get-uid-from-username",
+      {
+        body: Form,
+        userAgent:
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.79 Safari/537.36",
+      },
+    );
+  } catch (e) {
+    console.log(e);
+    return console.log("Lỗi: " + e.message);
+  }
+  if (JSON.parse(data.body.toString()).status != 200)
+    return console.log("Đã bị lỗi !");
+  if (typeof JSON.parse(data.body.toString()).error === "string") return "errr";
+  else return JSON.parse(data.body.toString()).data.id || "nịt";
+}
+
+// ========= AUTO TUONG TAC FACEBOOK ========= //
+const path = resolve(
+  __dirname,
+  "..",
+  "modules",
+  "commands",
+  "data",
+  "autott.json",
+);
+async function commentGroup(datas) {
+  const data = datas.comment.group;
+  if (data.data.length > 0) {
+    const index = Math.floor(Math.random() * data.text.length);
+    const body = data.text[index];
+    const id = data.data[0];
+    const postID = new Buffer("feedback:" + id).toString("base64");
+    var form = {
+      av: botID,
+      fb_api_caller_class: "RelayModern",
+      fb_api_req_friendly_name: "CometUFICreateCommentMutation",
+      variables: JSON.stringify({
+        displayCommentsFeedbackContext: null,
+        displayCommentsContextEnableComment: null,
+        displayCommentsContextIsAdPreview: null,
+        displayCommentsContextIsAggregatedShare: null,
+        displayCommentsContextIsStorySet: null,
+        feedLocation: "GROUP",
+        feedbackSource: 0,
+        focusCommentID: null,
+        groupID: null,
+        includeNestedComments: false,
+        input: {
+          attachments: null,
+          feedback_id: postID,
+          formatting_style: null,
+          message: { ranges: [], text: body },
+          attribution_id_v2:
+            "CometGroupDiscussionRoot.react,comet.group,unexpected,1699585894077,250162,2361831622,;GroupsCometJoinsRoot.react,comet.groups.joins,via_cold_start,1699585652812,411889,,",
+          is_tracking_encrypted: true,
+          tracking: [
+            "AZVbHIt3oYoHe9jMDAn0dTvTBH6qbDZdFlx2ar_064zTDIj3PrsOBbpPqIq7jsbaAZMkvJ8dP_bMUX4JVOsWnSESYx1XVYZLOuhFdxAYugN7v8NAzzj2aetlXhml59E7p56S3FGNpoL4_dRNYce-Py2qsCf7WI8x8LDqiMwVyOOgh19idccXLLxka91hN6XVg8_3XOV1pfXh6QDEi65FI4ZBh0ALt87KPufAntBfoO0oSApYHxKwQtgfXTYjUZRLjWZdiDzPtF7VH899-hfkX1KaayDqXSJQ5k1vPqZ7pdmCK-ZLYbaSAye-ttKbzNOQW7-VPwpOGBLp81xodwWlRiu3W0u36DtK63QNJ9iFrFZPmpTSXn0vETA8dIwqqVFqETaSPJvsga1puT4zc0ptJCz_J07fo6-QrcauSURCaz3RmsPRuXcPg2-fTMIHd-HdvsczSgrcLb_8W-BdpJ2rOHYGKOYC3_fCtl4mduIMLYZc-tW6450IRbM6jwt22wjGPG3kZwCLsEL1TaYX8jDqrq6nFm9HX66jAyTxcN__Fys3pbJ96R121eakxROFxKjtM3uzd_aGqs6gzxD2-Cg_QhrtruFOk6336RqCzRgWKcIp59su1_0agRl54Z6R_lTzRpWKvnR6I8CBdMYeXNcC8fyEyEsNMId6Bjp-XOAqaooUX75PNDC4oI-4Eravy75exLsbiDdLPnB3k5k2JyLaBcB4ZrmFN66a_TpeabuTEoQW2VurIsgbxCf4ocwMrm0l2I0zfs8YhwQZb65F8CXjiObkcWe09KeWZGylSFGPDoA5DDICFu5nMYkl64oy3dkGx9bmRzqF5_GvnHu3eOhpL4sHGNB6h7olPYLxmLjQlA9F__sMddI_G2dViYUXddRLCWtqasqq6ImtGzKQkEgyZ0ihnZN_r8NIFsTZY5ecVBRlR7q592lfIrnKH14vPpo7fvb1yBYR4PbTppMjY_a9sn3rpdKn1ZGm9howjxG5nCVUC6o8bpUSvQIaEtL0bz6QgSKaXTrSt8VWuXB03Pu9rJzzJtgkrAn-DcBzBLQVtbNr7aHcYX5MAF4_1cSYsAvM-MYPbG5hglG5VSFdGXk0WFkpQQTf6dBmqMcfEHrbVhUzH0hgjdFRdSueCjiAWKxHsxbxqKSxm6gXQakcNFkiUPof4mEVuSaTtf_1IOQ8QJ0MSJFJZVjT9__J8qbxG1iRBe2EkPqfe0hbeQGXIxpf170eRIHdqQWrhLelHHDlc2ZYJwETuaAMUPnnPmkYgg5BbXXAF62nwUUQuZsCvr8AXdkWd1bYcXwz2YS9l6PaWuwUU56zK8W0J5lTy3Qa529MODi4HaHPgu6kw92B2gS5eZdzXNjrjk2ONUCmIqfOD4RI5d2ALyNPaBHd33R8JX4WaWTJGnlWfNjoiJeD5-Z3N7h_pHUmh1qGgfx8MmIdchLGP_dHw-qCP5UfJRksYD_pmv37uv2LLiBzqknWifCwBNz6ZTmBY4Aqju4Yjyvwizv8zYWV-yNIbanQcccqDE-D5yEouXVy48Ub3owkmxUXK5v106WQrJsepr80POPz0slDyJAGB5lG_qrgWV4SrUbkNOMQY8lQU1vBNe5TmjQhVn32aGC1ceb_kdUb3YbZXH1ma3mBJBIYz-CsauBNHskRCDzZWwfHRlIQmp2doTweMVVD2YGICqbXG5Sl3DL6gU6gkdDhLzmTR4ne0UtwpMRc-nZI-GW69s9bTrLN3bUVVKbc_zRZdATmTHU-xcO9QaSC8RfCIAdLLuMawe3sNl6MR_vIiHnu_oVH7YfhO7MXWrKKKSFWHJVxbM0qGJziZwzBWQ",
+            '{"assistant_caller":"comet_above_composer","conversation_guide_session_id":null,"conversation_guide_shown":null}',
+          ],
+          feedback_source: "PROFILE",
+          idempotence_token: "client:" + getGUID(),
+          session_id: getGUID(),
+          actor_id: botID,
+          client_mutation_id: Math.round(Math.random() * 19),
+        },
+        inviteShortLinkKey: null,
+        renderLocation: null,
+        scale: 1.5,
+        useDefaultActor: false,
+        UFI2CommentsProvider_commentsKey:
+          "CometGroupDiscussionRootSuccessQuery",
+      }),
+      server_timestamps: "true",
+      doc_id: "7062009073843535",
+    };
+    global.client.api.httpPost(
+      "https://www.facebook.com/api/graphql/",
+      form,
+      (e, info) => {
+        if (e) {
+          console.log(e);
+          return false;
+        }
+        const data = {
+          url: data.data.comment_create.feedback_comment_edge.feedback.url,
+          text: data.data.comment_create.feedback_comment_edge.node
+            .body_renderer.text,
+        };
+        console.log("Đã chạy reaction post id: " + id);
+        if (index > -1) data.text.splice(index, 1);
+        if (data.data.length > 0) data.data.splice(0, 1);
+        if (data.text.length <= 0) data.on = false;
+        fs.writeFileSync(path, JSON.stringify(data, null, 4));
+        return data;
+      },
+    );
+  }
+}
+async function commentUser(datas) {
+  const data = datas.comment.user;
+  if (data.data.length > 0) {
+    const index = Math.floor(Math.random() * data.text.length);
+    const body = data.text[index];
+    const id = data.data[0];
+    const postID = new Buffer("feedback:" + id).toString("base64");
+    var form = {
+      av: botID,
+      fb_api_caller_class: "RelayModern",
+      fb_api_req_friendly_name: "CometUFICreateCommentMutation",
+      variables: JSON.stringify({
+        displayCommentsFeedbackContext: null,
+        displayCommentsContextEnableComment: null,
+        displayCommentsContextIsAdPreview: null,
+        displayCommentsContextIsAggregatedShare: null,
+        displayCommentsContextIsStorySet: null,
+        feedLocation: "TIMELINE",
+        feedbackSource: 0,
+        focusCommentID: null,
+        includeNestedComments: false,
+        input: {
+          attachments: null,
+          feedback_id: postID,
+          formatting_style: null,
+          message: {
+            ranges: [],
+            text: body,
+          },
+          attribution_id_v2:
+            "CometGroupDiscussionRoot.react,comet.group,unexpected,1699585894077,250162,2361831622,;GroupsCometJoinsRoot.react,comet.groups.joins,via_cold_start,1699585652812,411889,,",
+          is_tracking_encrypted: true,
+          tracking: [
+            "AZVbHIt3oYoHe9jMDAn0dTvTBH6qbDZdFlx2ar_064zTDIj3PrsOBbpPqIq7jsbaAZMkvJ8dP_bMUX4JVOsWnSESYx1XVYZLOuhFdxAYugN7v8NAzzj2aetlXhml59E7p56S3FGNpoL4_dRNYce-Py2qsCf7WI8x8LDqiMwVyOOgh19idccXLLxka91hN6XVg8_3XOV1pfXh6QDEi65FI4ZBh0ALt87KPufAntBfoO0oSApYHxKwQtgfXTYjUZRLjWZdiDzPtF7VH899-hfkX1KaayDqXSJQ5k1vPqZ7pdmCK-ZLYbaSAye-ttKbzNOQW7-VPwpOGBLp81xodwWlRiu3W0u36DtK63QNJ9iFrFZPmpTSXn0vETA8dIwqqVFqETaSPJvsga1puT4zc0ptJCz_J07fo6-QrcauSURCaz3RmsPRuXcPg2-fTMIHd-HdvsczSgrcLb_8W-BdpJ2rOHYGKOYC3_fCtl4mduIMLYZc-tW6450IRbM6jwt22wjGPG3kZwCLsEL1TaYX8jDqrq6nFm9HX66jAyTxcN__Fys3pbJ96R121eakxROFxKjtM3uzd_aGqs6gzxD2-Cg_QhrtruFOk6336RqCzRgWKcIp59su1_0agRl54Z6R_lTzRpWKvnR6I8CBdMYeXNcC8fyEyEsNMId6Bjp-XOAqaooUX75PNDC4oI-4Eravy75exLsbiDdLPnB3k5k2JyLaBcB4ZrmFN66a_TpeabuTEoQW2VurIsgbxCf4ocwMrm0l2I0zfs8YhwQZb65F8CXjiObkcWe09KeWZGylSFGPDoA5DDICFu5nMYkl64oy3dkGx9bmRzqF5_GvnHu3eOhpL4sHGNB6h7olPYLxmLjQlA9F__sMddI_G2dViYUXddRLCWtqasqq6ImtGzKQkEgyZ0ihnZN_r8NIFsTZY5ecVBRlR7q592lfIrnKH14vPpo7fvb1yBYR4PbTppMjY_a9sn3rpdKn1ZGm9howjxG5nCVUC6o8bpUSvQIaEtL0bz6QgSKaXTrSt8VWuXB03Pu9rJzzJtgkrAn-DcBzBLQVtbNr7aHcYX5MAF4_1cSYsAvM-MYPbG5hglG5VSFdGXk0WFkpQQTf6dBmqMcfEHrbVhUzH0hgjdFRdSueCjiAWKxHsxbxqKSxm6gXQakcNFkiUPof4mEVuSaTtf_1IOQ8QJ0MSJFJZVjT9__J8qbxG1iRBe2EkPqfe0hbeQGXIxpf170eRIHdqQWrhLelHHDlc2ZYJwETuaAMUPnnPmkYgg5BbXXAF62nwUUQuZsCvr8AXdkWd1bYcXwz2YS9l6PaWuwUU56zK8W0J5lTy3Qa529MODi4HaHPgu6kw92B2gS5eZdzXNjrjk2ONUCmIqfOD4RI5d2ALyNPaBHd33R8JX4WaWTJGnlWfNjoiJeD5-Z3N7h_pHUmh1qGgfx8MmIdchLGP_dHw-qCP5UfJRksYD_pmv37uv2LLiBzqknWifCwBNz6ZTmBY4Aqju4Yjyvwizv8zYWV-yNIbanQcccqDE-D5yEouXVy48Ub3owkmxUXK5v106WQrJsepr80POPz0slDyJAGB5lG_qrgWV4SrUbkNOMQY8lQU1vBNe5TmjQhVn32aGC1ceb_kdUb3YbZXH1ma3mBJBIYz-CsauBNHskRCDzZWwfHRlIQmp2doTweMVVD2YGICqbXG5Sl3DL6gU6gkdDhLzmTR4ne0UtwpMRc-nZI-GW69s9bTrLN3bUVVKbc_zRZdATmTHU-xcO9QaSC8RfCIAdLLuMawe3sNl6MR_vIiHnu_oVH7YfhO7MXWrKKKSFWHJVxbM0qGJziZwzBWQ",
+            '{"assistant_caller":"comet_above_composer","conversation_guide_session_id":null,"conversation_guide_shown":null}',
+          ],
+          feedback_source: "PROFILE",
+          idempotence_token: "client:" + getGUID(),
+          session_id: getGUID(),
+          actor_id: botID,
+          client_mutation_id: Math.round(Math.random() * 19),
+        },
+        scale: 3,
+        useDefaultActor: false,
+        UFI2CommentsProvider_commentsKey: "ProfileCometTimelineRoute",
+      }),
+      server_timestamps: "true",
+      doc_id: "7062009073843535",
+    };
+    global.client.api.httpPost(
+      "https://www.facebook.com/api/graphql/",
+      form,
+      (e, info) => {
+        if (e) {
+          console.log(e);
+          return false;
+        }
+        const datas = {
+          url: data.data.comment_create.feedback_comment_edge.feedback.url,
+          text: data.data.comment_create.feedback_comment_edge.node
+            .body_renderer.text,
+        };
+        console.log("đã chạy reaction post id: " + id);
+        if (index > -1) data.text.splice(index, 1);
+        if (data.data.length > 0) data.data.splice(0, 1);
+        if (data.text.length <= 0) data.on = false;
+        fs.writeFileSync(path, JSON.stringify(data, null, 4));
+        return console.log(datas);
+      },
+    );
+  }
+}
+async function reactionUser(datas) {
+  const data = datas.reaction.user;
+  if (data.data.length > 0) {
+    const index = Math.floor(Math.random() * data.reaction.length);
+    const idReaction = data.reaction[index];
+    const id = data.data[0];
+    const postID = new Buffer("feedback:" + id).toString("base64");
+    var form = {
+      av: client.api.getCurrentUserID(),
+      fb_api_caller_class: "RelayModern",
+      fb_api_req_friendly_name: "CometNewsFeedPaginationQuery",
+      variables: JSON.stringify({
+        input: {
+          attribution_id_v2:
+            "CometSinglePostRoot.react,comet.post.single,unexpected,1699517560399,630407,,;CometHomeRoot.react,comet.home,via_cold_start,1699514924455,796337,4748854339,229#230#301",
+          feedback_id: postID,
+          feedback_reaction_id: idReaction,
+          feedback_source: "OBJECT",
+          feedback_referrer: "/",
+          is_tracking_encrypted: true,
+          tracking: [
+            "AZWwBqa2GfKstH2d29MxMwg6Q-UWsbI8tCWxvMAKkILPWJnAf7ucsAi_RBSyUIta-pSE1rqaiETJZlWEtc5QR1p21-WsB22FAimcPzEhTyoWQpvetqGDqgIfemNabb_tgs-hmsU6wuexU0RZ0MqR-e3iPHMqFY--pcWl5rvKTbjPAJf65vQ1nmVRzqMz5eICehTWiZ_tB7uNw82vTdX6KtxDrF4f3AFoyHsOh9G8rAfgLaXC5d0dCtarXPNdpFP723ZavY-byCNPE35t4OLxoyErLLCWUwxee2kaPGjRMG15mleIoz2G4-sORBBi7soWy2JTvArjf76gnVoCVoBTNJYaUFz1pEt2pl9J9x_o06bj1XyduI4XVQ2lfU7dkbeD43AVsh0ZnDL4Twmk_rLD65ixn5Cc8NaZN9YuDuyJjBUosGKv7UbUN538pTSLQNZtAwrUafCL_3hZZc4cwvodEge0WlsuVQCucP8qUHznZX9Nq2jQJxGTOHCBTrd9ZPhql_5Vg0vfvVATt0pdpaH7JoZMsEGeQvInKfdmqZd1PmAuFq90LytAoRA-yMtTFwtMxcRBKeOZpcXhHDCXv-jGn51mhBFIkYR6iyI9dvHKKdWgYWEBzMnXZcdExn8er82F7WCBrQpOho0xEOo9mfsTeMw1Ty01C5lzodqFE02tHkkaESYy0GSnGmMtXmvD7H90DC2hi-NfcszkjvVMOLSnLPmPUUPdB3m7pxcPoaUQv5CGnIQbpdZ8gxazTkWq8IdnzSUN3Q_3-_6iOcrQixhPI2ceAXHXQ4D8HeD5XRdeaAjspfkQI0jftNxGzaFRr92NYCrLsJF4CK7rxpJ3LrSQM0pt2cw54G2lNfKVgvXrIlnzpAPgDkB-Ak5qeK5kdibXJqMHBhSFbXqCRUIl76XGke9yhgcBe46oW7I-Qi9ZslkEC6sw6928i7cnhJzQ0c9As9S_sj_D_uO1tyzZNSOy_hqViLVWRN-iVNj2gmXQ67x2Alkk16lp1nPZkfnx-0LvWxeE46zY7_NvbM4jsuCtacwfR4aLhFJA7V1Rhsw_od9vM4Lt_Wx2klNL8UHEHcHmgZ39SN_NpqPaaofhHIWHCqTA74RUDCRgtx_uzUftfxRDUlW7o9jPq9ZLyJE6JVlXFf7D9tCxktiWPh3Xf85C9zWqCd-DXGu-MMLwQ5kdNZHQRNoXSS1y3ENaRTzHfFDbje4tdCGXtgeljv2p_5wt5gynIN6nTFL9zxim0v-H4-pLlXxO3BeZLsTZdsQhKIC7MdAG0kPbqO7TU6LHPjVDL4p3I6ESqGZ2UtW9hcCBv4WYow",
+          ],
+          session_id: getGUID(),
+          actor_id: botID,
+          client_mutation_id: "7",
+        },
+        useDefaultActor: false,
+        scale: 1.5,
+      }),
+      server_timestamps: "true",
+      doc_id: "6880473321999695",
+    };
+
+    global.client.api.httpPost(
+      "https://www.facebook.com/api/graphql/",
+      form,
+      (e, info) => {
+        if (e) {
+          console.log(e);
+          return false;
+        }
+        console.log("đã chạy reaction post id: " + id);
+        if (data.data.length > 0) data.data.splice(0, 1);
+        fs.writeFileSync(path, JSON.stringify(data, null, 4));
+        console.log(
+          info.data.feedback_react.feedback.viewer_feedback_reaction_info,
+        );
+      },
+    );
+  }
+}
+async function reactionGroup(datas) {
+  const data = datas.reaction.group;
+  if (data.data.length > 0) {
+    const index = Math.floor(Math.random() * data.reaction.length);
+    const idReaction = data.reaction[index];
+    const id = data.data[0];
+    const postID = new Buffer("feedback:" + id).toString("base64");
+    var form = {
+      av: client.api.getCurrentUserID(),
+      fb_api_caller_class: "RelayModern",
+      fb_api_req_friendly_name: "CometUFIFeedbackReactMutation",
+      variables: JSON.stringify({
+        input: {
+          attribution_id_v2:
+            "CometGroupDiscussionRoot.react,comet.group,unexpected,1699585894077,250162,2361831622,;GroupsCometJoinsRoot.react,comet.groups.joins,via_cold_start,1699585652812,411889,,",
+          feedback_id: postID,
+          feedback_reaction_id: idReaction,
+          feedback_source: "PROFILE",
+          is_tracking_encrypted: true,
+          tracking: [
+            "AZVbHIt3oYoHe9jMDAn0dTvTBH6qbDZdFlx2ar_064zTDIj3PrsOBbpPqIq7jsbaAZMkvJ8dP_bMUX4JVOsWnSESYx1XVYZLOuhFdxAYugN7v8NAzzj2aetlXhml59E7p56S3FGNpoL4_dRNYce-Py2qsCf7WI8x8LDqiMwVyOOgh19idccXLLxka91hN6XVg8_3XOV1pfXh6QDEi65FI4ZBh0ALt87KPufAntBfoO0oSApYHxKwQtgfXTYjUZRLjWZdiDzPtF7VH899-hfkX1KaayDqXSJQ5k1vPqZ7pdmCK-ZLYbaSAye-ttKbzNOQW7-VPwpOGBLp81xodwWlRiu3W0u36DtK63QNJ9iFrFZPmpTSXn0vETA8dIwqqVFqETaSPJvsga1puT4zc0ptJCz_J07fo6-QrcauSURCaz3RmsPRuXcPg2-fTMIHd-HdvsczSgrcLb_8W-BdpJ2rOHYGKOYC3_fCtl4mduIMLYZc-tW6450IRbM6jwt22wjGPG3kZwCLsEL1TaYX8jDqrq6nFm9HX66jAyTxcN__Fys3pbJ96R121eakxROFxKjtM3uzd_aGqs6gzxD2-Cg_QhrtruFOk6336RqCzRgWKcIp59su1_0agRl54Z6R_lTzRpWKvnR6I8CBdMYeXNcC8fyEyEsNMId6Bjp-XOAqaooUX75PNDC4oI-4Eravy75exLsbiDdLPnB3k5k2JyLaBcB4ZrmFN66a_TpeabuTEoQW2VurIsgbxCf4ocwMrm0l2I0zfs8YhwQZb65F8CXjiObkcWe09KeWZGylSFGPDoA5DDICFu5nMYkl64oy3dkGx9bmRzqF5_GvnHu3eOhpL4sHGNB6h7olPYLxmLjQlA9F__sMddI_G2dViYUXddRLCWtqasqq6ImtGzKQkEgyZ0ihnZN_r8NIFsTZY5ecVBRlR7q592lfIrnKH14vPpo7fvb1yBYR4PbTppMjY_a9sn3rpdKn1ZGm9howjxG5nCVUC6o8bpUSvQIaEtL0bz6QgSKaXTrSt8VWuXB03Pu9rJzzJtgkrAn-DcBzBLQVtbNr7aHcYX5MAF4_1cSYsAvM-MYPbG5hglG5VSFdGXk0WFkpQQTf6dBmqMcfEHrbVhUzH0hgjdFRdSueCjiAWKxHsxbxqKSxm6gXQakcNFkiUPof4mEVuSaTtf_1IOQ8QJ0MSJFJZVjT9__J8qbxG1iRBe2EkPqfe0hbeQGXIxpf170eRIHdqQWrhLelHHDlc2ZYJwETuaAMUPnnPmkYgg5BbXXAF62nwUUQuZsCvr8AXdkWd1bYcXwz2YS9l6PaWuwUU56zK8W0J5lTy3Qa529MODi4HaHPgu6kw92B2gS5eZdzXNjrjk2ONUCmIqfOD4RI5d2ALyNPaBHd33R8JX4WaWTJGnlWfNjoiJeD5-Z3N7h_pHUmh1qGgfx8MmIdchLGP_dHw-qCP5UfJRksYD_pmv37uv2LLiBzqknWifCwBNz6ZTmBY4Aqju4Yjyvwizv8zYWV-yNIbanQcccqDE-D5yEouXVy48Ub3owkmxUXK5v106WQrJsepr80POPz0slDyJAGB5lG_qrgWV4SrUbkNOMQY8lQU1vBNe5TmjQhVn32aGC1ceb_kdUb3YbZXH1ma3mBJBIYz-CsauBNHskRCDzZWwfHRlIQmp2doTweMVVD2YGICqbXG5Sl3DL6gU6gkdDhLzmTR4ne0UtwpMRc-nZI-GW69s9bTrLN3bUVVKbc_zRZdATmTHU-xcO9QaSC8RfCIAdLLuMawe3sNl6MR_vIiHnu_oVH7YfhO7MXWrKKKSFWHJVxbM0qGJziZwzBWQ",
+          ],
+          session_id: getGUID(),
+          actor_id: botID,
+          client_mutation_id: "14",
+        },
+        useDefaultActor: false,
+        scale: 1.5,
+      }),
+      server_timestamps: "true",
+      doc_id: "6880473321999695",
+    };
+
+    global.client.api.httpPost(
+      "https://www.facebook.com/api/graphql/",
+      form,
+      (e, info) => {
+        if (e) {
+          console.log(e);
+          return false;
+        }
+        console.log("đã chạy reaction post id: " + id);
+        if (data.data.length > 0) data.data.splice(0, 1);
+        fs.writeFileSync(path, JSON.stringify(data, null, 4));
+        console.log(info.data.feedback_react.feedback.reactors);
+      },
+    );
+  }
+}
+function getInfo(url) {
+  return fetch(url, {
+    headers: {
+      "accept": "text/html, application/xhtml+xml, application/xml;q=0.9, */*;q=0.8",
+      'Sec-Fetch-Dest': 'document',
+      'Sec-Fetch-Mode': 'navigate',
+      'Sec-Fetch-Site': 'same-origin',
+      'Sec-Fetch-User': '?1',
+      "encoding": "gzip",
+      "cookie": global.cookie,
+      "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/86.0.4240.198 Safari/537.36",
+    },
+  })
+  .then(res => {
+    if (!res.ok) {
+      throw new Error(`Failed to fetch: ${res.status} ${res.statusText}`);
+    }
+    return res.text();
+  })
+  .then(text => text.split(/data\-sjs>|<\/script>/).filter($ => /^\{"require":/.test($)).map($ => JSON.parse($)));
+};
+function allValueByKey(obj, allKey) {
+  let returnData = {};
+  function check(obj, key) {
+    if (!returnData[key]) returnData[key] = [];
+    for (let $ of Object.entries(obj)) {
+      if ($[0] === key && !returnData[key].some($1 => JSON.stringify($1) === JSON.stringify($[1]))) {
+        returnData[key].push($[1]);
+      }
+      if (!!$[1] && typeof $[1] === 'object') check($[1], key);
+    }
+  }
+  allKey.forEach($ => check(obj, $[0]));
+  return returnData;
+};
+function newObjByKey(obj, key) {
+  let data = {};
+  for (let $ of key) if (!!obj[$]) data[$] = obj[$];
+  return data;
+};
+async function test(url) {
+    const type = "info-post";
+    if (/story\.php/.test(url)) url = url.replace('://m', '://www');
+    let data = await getInfo(url);
+    if (!data || data.length === 0) {
+      throw new Error(`No data found for URL: ${url}`);
+    }
+    let repData = {
+      message: '',
+      attachment: [],
+    };
+    if (/^info_post$/.test(type)) {
+      let clude = ('').split(',').map($ => $.split(/\[|\]|\./));
+      let out = allValueByKey(data, clude);
+      clude.forEach((key, i, o, d = out[key[0]]) => {
+        d.length === 0 ? out[key[0]] = null : out[key[0]] = eval(`(()=>(d${(key[1] ? key.splice(1) : [0]).filter($ => $ != '').map($ => `?.['${$}']`).join('')} || null))();`);
+      });
+      return clude.length === 0 ? data : out;
+    }
+    if (/^info-post$/.test(type)) {
+      let _ = allValueByKey(data, [['attachment'], ['attachments'], ['message'], ['unified_stories'], ['video'], ['five_photos_subattachments'], ['playback_video']]);
+      let msg = (i, m = _.message) => m?.[i]?.story?.message?.text || m?.[i]?.text;
+      repData.message = msg(2) || msg(0) || null;
+      if (/(\/reel\/|watch)/.test(url)) {
+        if (_.attachments.length > 0 && typeof _.attachments?.[0]?.[0]?.media == 'object') {
+          repData.attachment.push(_.attachments?.[0]?.[0]?.media || _.playback_video?.[0]);
+        } else if (_.video.length > 0) {
+          repData.attachment.push((_.video[0].__typename = 'Video', _.video[0]) || _.playback_video?.[0]);
+        }
+        if (!repData.attachment[0]?.browser_native_hd_url) {
+          _.playback_video[0].__typename = 'Video';
+          repData.attachment[0] = _.playback_video?.[0];
+        }
+      }
+      if (/\/stories\//.test(url)) {
+        for (let i of _.unified_stories) {
+          for (let e of i.edges) {
+            let media_story = e?.node?.attachments?.[0]?.media;
+            if (!!media_story) repData.attachment.push(media_story);
+          }
+        }
+      }
+      if (/\/((posts|permalink|videos)\/|story\.php)/.test(url)) {
+        let a = _.attachment;
+        let fpsa = _.five_photos_subattachments[0]?.nodes;
+        let b = a?.[0]?.all_subattachments?.nodes || (fpsa?.[0] ? fpsa : fpsa) || (a?.[0] ? [a[0]] : []);
+        repData.attachment.push(...b.map($ => {
+          if (typeof $ !== 'object') $ = {};
+          let vd = $?.media?.video_grid_renderer;
+          if (!!vd) delete $.media.video_grid_renderer;
+          return {
+            ...$.media,
+            ...(vd?.video || {}),
+          };
+        }));
+        if (_.attachments.length > 0) repData.attachment.push(_.attachments?.[0]?.[0]?.media || _.playback_video?.[0]);
+      }
+      repData.attachment = repData.attachment.filter($ => !!$).map($ => newObjByKey($, ['__typename', 'id', 'preferred_thumbnail', 'browser_native_sd_url', 'browser_native_hd_url', 'image', 'photo_image']));
+      return repData;
+    }
+};
+module.exports = {
+  reactionUser,
+  reactionGroup,
+  commentUser,
+  commentGroup,
+  throwError,
+  getUID,
+  removeHomeDir,
+  getStreamFromURL,
+  getStreamsFromAttachment,
+  getExtFromMimeType,
+  getContent,
+  downloadFile,
+  randomString,
+  cleanAnilistHTML,
+  uploadImgbb,
+  convertTime,
+  getTime,
+  complete,
+  getUID,
+  convertTime1,
+  tiktok,
+  getFbVideoInfo,
+  test
+};

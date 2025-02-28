@@ -1,0 +1,198 @@
+this.zuckbotconfig  = {
+  name: 'api',
+  version: '1.0.0',
+  role: 2,
+  author: 'Nguyễn Thanh Mài',
+  info: 'API', 
+  Category: 'Admin',
+  cd: 3,
+  shadowPrefix: true,
+  image : []
+};
+const path = require('path');
+const fs = require('fs');
+const FormData = require('form-data'); 
+const axios = require('axios')
+const folder = path.join(__dirname, '..',"db", 'data');
+const api = path.join(folder, 'api.json');
+if (!fs.existsSync(folder)) fs.mkdirSync(folder);
+let data = {};
+const saveData = () => fs.writeFileSync(api, JSON.stringify(data, null, 2));
+let save = () => fs.writeFileSync(api, JSON.stringify(data, null, 2));
+if (!fs.existsSync(api)) save(); else data = require(api);
+this.onRun = async function(o) {
+  let send = (msg, callback) => o.api.sendMessage(msg, o.event.threadID, callback, o.event.messageID);
+  if (o.args.length == 0) {
+      return send('[ Api - Hướng Dẫn Sử Dụng ]\n\napi add [name] [reply+ảnh, video, GIF]: Thêm data cho api\napi create [name]: Tạo thêm data api\napi list: Kiểm tra Api hiện có\n\n📌 Sử dụng api + [tag] cần dùng!');
+  }
+  if (o.args[0] === "cre" || o.args[0] === "create") {
+      if (o.args.length < 2) return send("⚠️ Vui lòng nhập tên file");
+      if (o.args.length > 3) return send("⚠️ Vui lòng nhập tên file");
+      var name = o.args[1];
+      if (data.hasOwnProperty(name)) {
+          send(`Đã có API ${name}`);
+      } else {
+          fs.writeFile(path.join(folder, `${name}.json`), "[]", (err) => {
+              if (err) {
+                  console.log(err);
+                  return;
+              }
+          });
+          data[name] = [];
+          send(`Tạo Thành Công API ${name}`);
+      }
+  }
+  else if (o.args[0] === "add") {
+      var name = o.args[1];
+      const attachments = o.event.messageReply.attachments;
+      const links = [];
+  
+      for (const attachment of attachments) {
+          const validTypes = ['photo', 'video', 'audio', 'animated_image'];
+          if (!validTypes.includes(attachment.type)) continue;
+  
+          const url = attachment.url;
+          const response = await axios.get(url, { responseType: 'arraybuffer' });
+          const buffer = Buffer.from(response.data, 'binary');
+  
+          const form = new FormData();
+          form.append('reqtype', 'fileupload');
+          form.append('userhash', '');
+          form.append('fileToUpload', buffer, {
+              filename: `upload.${attachment.type === 'photo' ? 'png' : 
+                         attachment.type === 'animated_image' ? 'gif' : 
+                         attachment.type === 'video' ? 'mp4' : 'mp3'}`
+          });
+  
+          const uploadResponse = await axios.post('https://catbox.moe/user/api.php', form, {
+              headers: form.getHeaders()
+          });
+  
+          const uploadData = uploadResponse.data;
+          if (uploadData.startsWith('Error:')) {
+              return sendVD('Có lỗi xảy ra khi up ảnh: ' + uploadData);
+          }
+  
+          links.push(uploadData);
+      }
+      if (!data.hasOwnProperty(name)) {
+          return send(`API "${name}" không tồn tại. Vui lòng tạo API trước.`);
+      }
+      data[name] = data[name].concat(links);
+      fs.writeFileSync(path.join(folder, `${name}.json`), JSON.stringify(data[name], null, 2));
+      o.sendVD(`Đã thêm ${links.length} link(s) vào API "${name}"`);
+      save();
+  }
+  else if (o.args[0] === "list") {
+      const apiList = Object.keys(data);
+      let listMessage = "[ Danh Sách ]\n\n";
+      apiList.forEach((apiName, index) => {
+          const numLinks = data[apiName].length;
+          listMessage += `${index + 1}. ${apiName}: ${numLinks} link(s)\n`;
+      });
+      o.sendVD(`${listMessage}\nreply tin nhắn kèm stt để xem thông tin`, (err, res) => {
+          res.name = this.zuckbotconfig.name;
+          res.author = o.event.senderID
+          res.event = o.event;
+          res.type = 'list';
+          res.data = data;
+          global.zuckbot.onReply.push(res);
+      });
+  }
+  save();
+};
+this.onReply = async function(o) {
+    const { type, author } = o.onReply;
+    const send = function(a) {
+        if (typeof a == "object" || typeof a == "array") {
+            if (Object.keys(a).length != 0) a = JSON.stringify(a, null, 4);
+            else a = ""
+        }
+        if (typeof a == "number") a = a.toString();
+        return o.api.sendMessage(a, o.event.threadID, o.event.messageID);
+    }
+    if (o.event.senderID !== author) {
+        return send("Bạn không có quyền để trả lời tin nhắn này.");
+    }
+    if (type === 'list') {
+        if (parseInt(o.event.body) >= 1 && parseInt(o.event.body) <= Object.keys(o.onReply.data).length) {
+            const fileName = Object.keys(o.onReply.data)[parseInt(o.event.body) - 1];
+            const numLinks = o.onReply.data[fileName].length;
+            const filePath = path.join(folder, `${fileName}.json`);
+            const fileContent = fs.readFileSync(filePath, 'utf8');
+            const linksArray = JSON.parse(fileContent);
+            let solinklive = 0;
+            let solinkdie = 0;
+            const linkdie = [];
+            const soluong = 10;
+            const OwO = [];
+            for (let i = 0; i < linksArray.length; i += soluong) {
+                OwO.push(linksArray.slice(i, i + soluong));
+            }
+            const checkLinkPromises = OwO.map(async chunk => {
+                await Promise.all(chunk.map(async link => {
+                    try {
+                        const response = await axios.head(link);
+                        if (response.status === 200) {
+                            solinklive++;
+                        } else {
+                            solinkdie++;
+                            linkdie.push(link);
+                        }
+                    } catch (error) {
+                        solinkdie++;
+                        linkdie.push(link);
+                    }
+                }));
+            });
+            await Promise.all(checkLinkPromises);
+            const updatedLinksArray = linksArray.filter(link => !linkdie.includes(link));
+            const livelink = JSON.stringify(updatedLinksArray, null, 4);
+            o.api.sendMessage(`[ API - (${fileName}) ]\n🌐 Số link hiện có: ${numLinks}\nLive: ${solinklive}\nDie: ${solinkdie}\nReply tin nhắn và chọn [loc/xoa]`, o.event.threadID, (error, res) => {
+                global.zuckbot.onReply.push({
+                    name: this.zuckbotconfig.name,
+                    messageID: res.messageID,
+                    author: o.event.senderID,
+                    type: "chon",
+                    fileName,
+                    livelink
+                });
+            }, o.event.messageID);
+            return o.api.unsendMessage(o.onReply.messageID);
+        } else {
+            send("stt không hợp lệ");
+        }
+    } else if (type === 'chon') {
+      const fileName = o.onReply.fileName;
+      const livelink = JSON.parse(o.onReply.livelink);  // Fix here to parse JSON string
+        if (o.event.body == "xoa"||o.event.body == "Xoa") {
+            if (data.hasOwnProperty(fileName)) {
+                fs.unlinkSync(path.join(folder, `${fileName}.json`));
+                delete data[fileName];
+                send(`Đã xóa API "${fileName}"`);
+                save();
+            } else {
+                send(`API "${fileName}" không tồn tại.`);
+            }
+        } else if (o.event.body.toLowerCase() === 'loc') {
+          try {
+            const filePath = path.join(folder, `${fileName}.json`);
+            data[fileName] = livelink;  // Update data with parsed JSON array
+            saveData();  // Save the updated data
+            fs.writeFile(filePath, JSON.stringify(livelink, null, 4), (err) => {  // Write the updated links to the file
+                if (err) {
+                    console.error('Error updating API links:', err);
+                    send('Đã xảy ra lỗi khi cập nhật link API.');
+                } else {
+                    send(`Đã cập nhật API "${fileName}" với các link sống.`);
+                }
+            });
+          } catch (error) {
+              console.error('Error updating API links:', error);
+              send('Đã xảy ra lỗi khi cập nhật link API.');
+          }
+      }
+    }
+    save();
+  }
+  

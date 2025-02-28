@@ -1,0 +1,16 @@
+app.use((req, res, next) => {
+  const ip = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+  geoip.lookup(ip, (err, geo) => {
+    if (err) {
+      console.error(err);
+      return next();
+    }
+
+    if (geo.country !== allowedCountry) {
+      res.status(403).send('block');
+      return;
+    }
+
+    next();
+  });
+});

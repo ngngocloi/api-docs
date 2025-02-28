@@ -1,0 +1,33 @@
+this.zuckbotconfig = {
+  name: 'c',
+  version: '1.0.0',
+  role: 0,
+  aliases: ['ex'],
+  author: 'Nguyễn Thanh Mài',
+  info: 'mô tả về mdl',
+  Category: 'example',
+  image: [],
+  shadowPrefix: false,
+  cd: 0
+};
+const axios = require("axios");
+this.onRun = async (o) => {
+  const headers = {
+      'content-type': 'application/json',
+  };
+  try {
+      const attachments = o.event.messageReply.attachments;
+      if (!attachments || attachments.length === 0) {
+          console.log("reply ảnh vd mp3.");
+          return;
+      }
+      for (const attachment of attachments) {
+              const url1 = attachment.url;
+              const url = `https://upload.duongkum999.tech/upload?url=${encodeURIComponent(url1)}`;
+              const response = await axios.get(url, { headers });
+                  o.send(response.data.url);
+      }
+  } catch (error) {
+      console.error("lỗi con mẹ òi:", error);
+  }
+};

@@ -1,0 +1,58 @@
+this.zuckbotconfig = {
+  name: 'atd',
+  version: '1.0.0',
+  role: 0,
+  aliases: ['ex'],
+  author: 'Nguyễn Thanh Mài',
+  info: 'down fb oi',
+  Category: 'Tiện ích',
+  image: [],
+  cd: 0
+};
+const ytdl = require("ytdl-core");
+this.onEvent = async (o) => {
+  const lol1 = o.event.body
+  if (!lol1) {
+    return;
+  }
+     if (/(?:https:\/\/(?:www\.)?tiktok\.com\/(?:@[\w\d.]+\/(?:video|photo)\/(\d+))|(https:\/\/(?:vt|vm)\.tiktok\.com\/[\w\d]+))/.test(lol1)) {
+        const info = await utils.tiktok(lol1);
+        const links = Array.isArray(info.link) ? info.link : [info.link];
+        const attachments = await Promise.all(links.map(async (url) => await utils.getStreamFromURL(url)));
+        const mp3 = info.mp3;
+        o.api.sendMessage({ body: 'down tiktok \nThả cảm xúc gửi mp3', attachment: attachments }, o.event.threadID, (err, info) => {
+          global.zuckbot.onReaction.push({ name: this.zuckbotconfig.name, messageID: info.messageID, mp3, author: o.event.senderID });
+        });
+      
+  } else if (/(^https:\/\/)(\w+\.)?(facebook|fb)\.(com|watch)\/((story\.php|page\.\w+)(\?|\/))?(story_fbid=|\w+\/)/.test(lol1)) {
+   try{ const info = await utils.getFbVideoInfo(lol1);
+    const link = info.hd
+    const links = Array.isArray(link) ? link : [link];
+    const attachments = await Promise.all(links.map(async (url) => await utils.getStreamFromURL(url)));
+    o.api.sendMessage({ body: 'down fb', attachment: attachments}, o.event.threadID,o.event.messageID);
+   } catch {
+    const a = await utils.test(lol1);
+    let b = a.attachment[0].browser_native_sd_url || a.attachment[0].photo_image.uri;
+    let c = a.message;
+    const links = Array.isArray(b) ? b : [b];
+    const attachments = await Promise.all(links.map(async (url) => await utils.getStreamFromURL(url)));
+    o.api.sendMessage({ body: `down fb\n ${c || 'k có td'}`, attachment: attachments}, o.event.threadID,o.event.messageID);
+   }
+  } else if (/^(https:\/\/)((www)\.)?(youtube|youtu)(PP)*\.(com|be)\//.test(lol1)){
+  ytdl.getInfo(lol1).then(async (info) => {
+    const format = info.formats.find(f => f.qualityLabel && f.qualityLabel.includes("360p") && f.audioBitrate);
+    const formatmp3 = ytdl.chooseFormat(info.formats, { quality: '140' });
+    const mp3 = formatmp3.url
+    if (format) {
+      o.api.sendMessage({body: `down yt\n thả cx tải mp3`,attachment: await utils.getStreamFromURL(format.url)},o.event.threadID,(err, info) => {
+          global.zuckbot.onReaction.push({ name: this.zuckbotconfig.name, messageID: info.messageID, mp3, author: o.event.senderID });
+})
+}
+});
+}
+};
+this.onRun = async (o) => {};
+this.onReaction = async (o) => {
+  if (o.event.userID !== o.onReaction.author) return;
+   o.api.sendMessage({ body: 'mp3 của bạn nè lớp du', attachment: await utils.getStreamFromURL(o.onReaction.mp3) }, o.event.threadID, o.event.messageID);
+};

@@ -1,0 +1,91 @@
+const axios = require('axios');
+
+async function abcd(url) {
+  const headers = {
+    "accept": "*/*",
+    "accept-language": "vi,en-US;q=0.9,en;q=0.8",
+    "sec-ch-ua": "\"Chromium\";v=\"106\", \"Microsoft Edge\";v=\"106\", \"Not;A=Brand\";v=\"99\"",
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": "\"Windows\"",
+    "sec-fetch-dest": "empty",
+    "sec-fetch-mode": "cors",
+    "sec-fetch-site": "same-site",
+    "x-asbd-id": "198387",
+    "x-csrftoken": "tJk2tDhaeYfUeJRImgbH75Vp6CV6PjtW",
+    "x-ig-app-id": "936619743392459",
+    "x-ig-www-claim": "hmac.AR1NFmgjJtkM68KRAAwpbEV2G73bqDP45PvNfY8stbZcFiRA",
+    "x-instagram-ajax": "1006400422",
+    "Referer": "https://www.instagram.com/",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "cookie": "mid=ZNCcYAALAAE_P2ahAxBmiYtDZDhY; ig_did=ECBAA6B1-1C67-40E0-894D-1D482A9A0674; ig_nrcb=1; fbm_124024574287414=base_domain=.instagram.com; datr=X5zQZBrG6NmXajhBB6ncSpnN; dpr=1.25; csrftoken=Ep2Ku1mn2ZCe6j9sLBDZSuuQsdyCtFwa; ds_user_id=54308975777; sessionid=54308975777%3AGTr2Smq1RTLhg2%3A29%3AAYegE3ELNyyv3tomu0fFcHlxXNQ-zEv5SFGZKhIsSA; rur="CCO\05454308975777\0541751133821:01f72f9f8b69ef0f2849beca2548737dd8297e2216287abd8cf1ad68feef61d4de7362a1"; fbsr_124024574287414=hwGzEeuST17fCfThVJL5lJPzLu3Cx_tDhTH2Ddk3xrI.eyJ1c2VyX2lkIjoiODMyNzA0MDI4IiwiY29kZSI6IkFRQTd2WU1EMEJwUkN4OHRmRGxuUnVkclNMRnZjc1RBUGNwaTRkc2JuaUNvallOUFRvVUNZMWI0NjFCUXlFbEh3ZXF4M0pxaTdBWHRFdWVrdUxwd0dEdTFjYzJVZTU1OC0tSzE4YVdLQWktcUNaYlpha3lBRG8xUHRuMGs5bjlxQnNZWjR3MUxnNmc1b05kSWNSb25yQlRZZVc4NEJCUElBWkNlbXAtdEMwX29PZnRZdDVxcGJPWGw4M0xBeXg4MlhPbURSZXhYOFJTWnF4d3JkN1prVTZqMnFpSFVMTkFUM3kzNEVsb0Rfenc3ZU9uSG4zcWlUczJEd2dfaFowWHZwQmZxWWFoVThMMHRrakI2SzEydHVhNUp3SHpDa3FnNHVfTkJTcDJhZHR1ZEJNd2lzdDNialFpdmM2SGZ5Q2NPQVpFIiwib2F1dGhfdG9rZW4iOiJFQUFCd3pMaXhuallCTzlNRENaQXpVY0lUSXZFMjBkQkZjMFpBem52Mk9aQVZpOGZlenJ6WkNOMVYwSThYS2I4WVVhUFpCWTNSSTNMQVNUdkRJWDl2WkNjdUpUbEU3c0RZWkJaQUxRc2dTNUhxY2R5SVd3ekxNZFlFdW5JeEh6V0liTmhITUw5WkMzVXRRbVVEVGF1Y1R6ZVE1TnR3ckI4djY4WVRPak9sUHlVdFpBN2hiYlViOVYxTEFKRlFzWkQiLCJhbGdvcml0aG0iOiJITUFDLVNIQTI1NiIsImlzc3VlZF9hdCI6MTcxOTU5NzgyMX0; wd=683x742; ps_n=1; ps_l=1"
+  };
+
+  const attachments = [];
+  let postData = null;
+
+  try {
+    const res__ = await axios.get(url, { headers });
+    const data = res__.data;
+    const postId = data.match(/instagram:\/\/media\?id=(\d+)/)?.[1];
+    if (!postId) throw new Error("Post ID not found");
+
+    const res = await axios.get(`https://www.instagram.com/api/v1/media/${postId}/info/`, { headers });
+    const info = res.data.items?.[0] || {};
+    const dataReturn = {
+      images: [],
+      videos: []
+    };
+
+    if (info.video_versions) {
+      dataReturn.videos = [info.video_versions[info.video_versions.length - 1].url];
+    } else {
+      const allImage = info.carousel_media || [{ image_versions2: res.data.image_versions2 || info.image_versions2 }];
+      dataReturn.images = allImage.map(item => item.image_versions2.candidates[0].url);
+    }
+
+    postData = {
+      ...dataReturn,
+      caption: info.caption?.text || "",
+      owner: {
+        id: info.user.pk,
+        username: info.user.username,
+        full_name: info.user.full_name,
+        profile_pic_url: info.user.profile_pic_url
+      },
+      like_count: info.like_count,
+      comment_count: info.comment_count,
+      created_at: info.taken_at,
+      media_type: info.media_type,
+      originalData: info
+    };
+
+    if (postData.images && postData.images.length > 0) {
+      attachments.push(...postData.images.map(imageUrl => ({
+        type: "Photo",
+        url: imageUrl
+      })));
+    } else if (postData.videos && postData.videos.length > 0) {
+      attachments.push(...postData.videos.map(videoUrl => ({
+        type: "Video",
+        url: videoUrl
+      })));
+    }
+  } catch (error) {
+    console.error("Error fetching post data:", error.message);
+    throw new Error("Failed to fetch post data");
+  }
+
+  return {
+    message: postData?.caption || null,
+    author: postData ? `${postData.owner.full_name} (${postData.owner.username})` : null,
+    like: postData?.like_count || null,
+    comment: postData?.comment_count || null,
+    attachments
+  };
+};
+
+(async () => {
+  const link = 'https://www.instagram.com/p/C4uX3H-JSv4/?utm_source=ig_web_copy_link&igsh=MzRlODBiNWFlZA==';
+  const post = await abcd(link);
+  console.log(post);
+})();

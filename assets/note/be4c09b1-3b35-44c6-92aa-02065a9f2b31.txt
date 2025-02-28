@@ -1,0 +1,31 @@
+const attachments = event.messageReply.attachments;
+  const links = [];
+
+  for (const attachment of attachments) {
+    const validTypes = ['photo', 'video', 'audio', 'animated_image'];
+    if (!validTypes.includes(attachment.type)) continue;
+
+    const url = attachment.url;
+    const response = await axios.get(url, { responseType: 'arraybuffer' });
+    const buffer = Buffer.from(response.data, 'binary');
+
+    const form = new FormData();
+    form.append('reqtype', 'fileupload');
+    form.append('userhash', '');
+    form.append('fileToUpload', buffer, {
+      filename: `upload.${attachment.type === 'photo' ? 'png' : 
+                 attachment.type === 'animated_image' ? 'gif' : 
+                 attachment.type === 'video' ? 'mp4' : 'mp3'}`
+    });
+
+    const uploadResponse = await axios.post('https://catbox.moe/user/api.php', form, {
+      headers: form.getHeaders()
+    });
+
+    const data = uploadResponse.data;
+    if (data.startsWith('Error:')) {
+      return api.sendMessage('Có lỗi xảy ra khi up ảnh: ' + data, event.threadID, event.messageID);
+    }
+
+    links.push(data);
+  }

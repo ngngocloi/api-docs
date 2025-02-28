@@ -1,0 +1,6 @@
+--ReactNativeBlobUtil-wckbgonogunjc0efw3y35
+Content-Disposition: form-data; name="text"
+Content-Type: text/plain
+
+hjnn
+--ReactNativeBlobUtil-wckbgonogunjc0efw3y35--

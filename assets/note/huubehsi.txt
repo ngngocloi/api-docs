@@ -1,0 +1,85 @@
+var fs = require("fs");
+var cache = __dirname + "/../cache/";
+var request = require("request").defaults({ jar: true });
+
+var headers = {
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+    "Accept-Language": "vi-VN,vi;q=0.9,fr-FR;q=0.8,fr;q=0.7,en-US;q=0.6,en;q=0.5",
+    "Cache-Control": "max-age=0",
+    "Priority": "u=0, i",
+    "Sec-Ch-Ua": "\"Not/A)Brand\";v=\"99\", \"Chromium\";v=\"126\", \"Google Chrome\";v=\"126\"",
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": "\"Windows\"",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "same-origin",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+}
+
+function getDataFromURL(url) {
+    var callback;
+    var rtPromise = new Promise(function (resolve, reject) {
+        callback = (error, response) => error ? reject(error) : resolve(response);
+    });
+
+    request({ url, headers }, callback);
+
+    return rtPromise;
+}
+
+module.exports = {
+    info: {
+        path: "/tiktok/:feature",
+        title: "TikTok",
+        desc: "",
+        example_url: [
+            { 
+                method: "GET",
+                query: "/tiktok/video?url=https://vt.tiktok.com/ZSYfwSGuC/",
+                desc: "Get video without watermark" 
+            }
+        ]
+    },
+    methods: {
+        get: async function (req, res) {
+            var statusCode, responseData;
+            var feature = req.params.feature;
+            var url = req.query.url.split("?")[0];
+
+            if (!/^https:\/\/(www\.|m\.|vt\.|vm\.)?tiktok\.com\/(@[A-Za-z0-9_.]+\/video\/\d+|video\/\d+|Z[A-Za-z0-9]+\/?)$/.test(url)) {
+                statusCode = 403;
+                responseData = {
+                    error: "url is not accepted"
+                }
+            } else {
+                try {
+                    switch (feature) {
+                        case "video":
+                            var resData = await getDataFromURL(url);
+                            var playAddr = resData.body.split("playAddr\":\"")[1].split("\"")[0].split("\\u002F").join("/");
+                            var path = cache + Date.now() + ".mp4";
+                            res.status(200);
+                            res.setHeader("Content-Type", "video/mp4");
+                            return request({ url: playAddr, headers }).pipe(res);
+                        default:
+                            statusCode = 404;
+                            responseData = {
+                                error: "feature is not supported"
+                            }
+                            break
+                    }
+                } catch (error) {
+                    statusCode = 500;
+                    responseData = {
+                        error: "fail when request to url"
+                    }
+                }
+            }
+
+            res.status(statusCode);
+            return res.json(responseData);
+        }
+    }
+}

@@ -1,0 +1,75 @@
+const fs = require('fs');
+const axios = require('axios');
+const path = require('path');
+const https = require('https');
+
+const dieFile = 'die.txt';   
+const downloadDir = 'videos'; 
+
+if (!fs.existsSync(downloadDir)) {
+    fs.mkdirSync(downloadDir);
+}
+
+const urlsPath = 'urls.json';
+let urls;
+try {
+    const data = fs.readFileSync(urlsPath, 'utf-8');
+    urls = JSON.parse(data);
+} catch (error) {
+    console.error('Error reading urls.json:', error);
+    process.exit(1);
+}
+
+(async () => {
+    const failedUrls = [];
+    for (let i = 0; i < urls.length; i++) {
+        const url = urls[i];
+        const filename = path.basename(url);
+        const filepath = path.join(downloadDir, filename);
+
+        try {
+            
+            const response = await axios.head(url, {
+                httpsAgent: new https.Agent({ keepAlive: true }),
+                maxRedirects: 0 
+            });
+
+            if (response.status !== 200) {
+                throw new Error(`HTTP status code: ${response.status}`);
+            }
+
+            const videoResponse = await axios({
+                url: url,
+                method: 'GET',
+                responseType: 'stream',
+                httpsAgent: new https.Agent({ keepAlive: true }),
+            });
+
+            const writer = fs.createWriteStream(filepath);
+            videoResponse.data.pipe(writer);
+
+            await new Promise((resolve, reject) => {
+                writer.on('finish', () => {
+                    console.log(`Downloaded video #${i + 1} from ${url}`);
+                    resolve();
+                });
+                writer.on('error', reject);
+            });
+
+            if (fs.existsSync(filepath)) {
+                fs.unlinkSync(filepath);
+            }
+
+        } catch (error) {
+            failedUrls.push(url);
+            if (fs.existsSync(filepath)) {
+                fs.unlinkSync(filepath);
+            }
+            console.error(`Failed to download video #${i + 1} from ${url}:`, error);
+        }
+    }
+
+    if (failedUrls.length > 0) {
+        fs.writeFileSync(dieFile, failedUrls.map((url, index) => `Failed video #${index + 1}: ${url}`).join('\n'));
+    }
+})();

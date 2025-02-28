@@ -1,0 +1,44 @@
+this.zuckbotconfig = {
+    name: 'upload',
+    version: '1.0.0',
+    role: 0,
+    aliases: ['up'],
+    author: 'Nguyễn Thanh Mài',
+    info: 'Mô tả về mdl',
+    Category: 'Tiện ích',
+    image: [],
+    shadowPrefix: false,
+    cd: 0
+};
+
+const axios = require("axios");
+
+this.onRun = async (o) => {
+    const headers = {
+        'Content-Type': 'application/json',
+    };
+    try {
+        // Check if there is a message reply with attachments
+        if (!o.event || !o.event.messageReply || !o.event.messageReply.attachments || o.event.messageReply.attachments.length === 0) {
+            o.send("Reply with an attachment like an image or mp3.");
+            return;
+        }
+
+        const attachments = o.event.messageReply.attachments;
+        const urls = [];
+
+        // Process each attachment
+        for (const attachment of attachments) {
+            const url1 = attachment.url;
+            const uploadUrl = `https://upload.duongkum999.tech/upload?url=${encodeURIComponent(url1)}`;
+            const response = await axios.get(uploadUrl, { headers });
+            urls.push(response.data.url);
+        }
+
+        // Send all URLs in a single message
+        o.send(urls.join("\n"));
+
+    } catch (error) {
+        console.error("An error occurred:", error);
+    }
+};
